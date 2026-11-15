@@ -5,6 +5,7 @@ export const ACTION_CONFIRM = 'confirm';
 export const ACTION_PAUSE = 'pause';
 export const ACTION_RESTART = 'restart';
 export const ACTION_MUTE = 'mute';
+export const ACTION_PRISM = 'prism';
 
 /** Keys that map to each action. */
 const ACTION_KEYS = {
@@ -12,6 +13,7 @@ const ACTION_KEYS = {
   [ACTION_PAUSE]: ['KeyP', 'Escape'],
   [ACTION_RESTART]: ['KeyR'],
   [ACTION_MUTE]: ['KeyM'],
+  [ACTION_PRISM]: ['KeyQ'],
 };
 
 /** Keys that steer: arrows and WASD, held down. */

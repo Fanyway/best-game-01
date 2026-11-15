@@ -2,15 +2,15 @@
 // fixed 1/60 s steps (several in a slow frame, none in a fast one), and the renderer paints
 // what is there. The game moves between five screens: title, play, paused, win and game over.
 //
-// ?seed=N fixes the shard and sentinel pattern. ?shot=title|play|intense|over (with &seed=N)
+// ?seed=N fixes the shard and sentinel pattern. ?shot=title|play|intense|win (with &seed=N)
 // stages that scene instead of running the loop, paints it twice and sets window.__shotReady
 // for a screenshot.
 
 import { MAX_FRAME, STEP } from './config.js';
 import { createRandom } from './random.js';
 import { createAudio } from './audio.js';
-import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, ACTION_RESTART, createInput } from './input.js';
-import { createWorld, readBest, resetWorld, saveBest, stepWorld, worldFromSeed } from './levels.js';
+import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, ACTION_PRISM, ACTION_RESTART, createInput } from './input.js';
+import { createWorld, placePrism, readBest, resetWorld, saveBest, stepWorld, worldFromSeed } from './levels.js';
 import {
   BUTTONS,
   SCREEN_OVER,
@@ -69,6 +69,13 @@ function handleEvents(events) {
   for (const event of events) {
     if (event.type === 'pickup') audio.pickup(event.combo);
     if (event.type === 'powerup') audio.powerup();
+    if (event.type === 'beam') audio.beam();
+    if (event.type === 'split') audio.split();
+    if (event.type === 'kill') audio.burn();
+    if (event.type === 'bossDown') {
+      audio.win();
+      announce(`Boss burned! Score ${event.score}.`);
+    }
     if (event.type === 'shieldBreak') audio.hit();
     if (event.type === 'hit') {
       audio.hit();
@@ -76,6 +83,7 @@ function handleEvents(events) {
     }
     if (event.type === 'wave') {
       audio.waveClear();
+      if (event.wave === 10) audio.boss();
       announce(`Wave ${event.wave}. Bonus ${event.bonus}.`);
     }
     if (event.type === 'win') {
@@ -114,6 +122,12 @@ function update(dt) {
     if (input.pressed(ACTION_PAUSE)) {
       screen = SCREEN_PAUSED;
     } else {
+      // Q or a click on the prism button spends banked shards on a prisma.
+      const prismKey = input.pressed(ACTION_PRISM);
+      const prismClick = click && hitButton(BUTTONS.prism, click);
+      if (prismKey || prismClick) {
+        if (placePrism(world)) audio.prism();
+      }
       handleEvents(stepWorld(world, input, dt));
     }
     if (click) input.clearClick();

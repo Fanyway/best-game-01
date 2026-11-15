@@ -1,12 +1,18 @@
 // The world and its waves: a fresh run, a wave's spec and spawns, and the one step that
 // moves everything and settles the score. The world is the single record of truth; the
 // renderer and the screenshots only read it.
+//
+// v2: light is a resource. It drains every second and faster on surge waves; each shard
+// feeds it back. Banked shards widen the light — and buy prisms, so every prisma costs
+// vision. Prisms bend light into beams that burn sentinels; the only way to kill one.
 
 import {
   COLORS,
   FIELD,
+  LIGHT,
   LIVES,
   POWERUP,
+  PRISM,
   SHARD,
   WAVE_CLEAR_BONUS,
   WAVES,
@@ -17,24 +23,38 @@ import {
   burst,
   checkCollisions,
   createPlayer,
+  floater,
   spawnPowerup,
+  spawnPrism,
   spawnSentinel,
   spawnShard,
+  updateBeams,
   updatePlayer,
   updatePowerups,
+  updatePrisms,
   updateSentinels,
   updateShards,
 } from './entities.js';
 
-/** A fresh world: wave 1 staged, nothing collected, three lives. */
+/** The light radius from the meter and the bank: wide when fed, a pinhole when starved. */
+export function lightRadius(world) {
+  const fromBank = Math.min(world.bank, LIGHT.radiusBankCap) * LIGHT.radiusPerBank;
+  const fromMeter = world.light * LIGHT.radiusPerLight;
+  return Math.max(LIGHT.minRadius, LIGHT.radiusBase + fromBank + fromMeter);
+}
+
+/** A fresh world: wave 1 staged, nothing collected, three lives, a full lamp. */
 export function createWorld(random) {
   const world = {
     random,
     player: createPlayer(),
     shards: [],
     sentinels: [],
+    prisms: [],
+    beams: [],
     powerups: [],
     particles: [],
+    floaters: [],
     wave: 1,
     spec: waveSpec(1),
     score: 0,
@@ -42,31 +62,49 @@ export function createWorld(random) {
     comboTimer: 0,
     lives: LIVES,
     collected: 0,
+    bank: 0,
+    light: LIGHT.max,
+    lightRadius: 0,
     time: 0,
     shake: 0,
     flash: 0,
     waveBanner: 0,
+    beamSoundTimer: 0,
+    spawnTimer: 2,
+    stats: { kills: 0, prismsPlaced: 0, shardsEaten: 0 },
     over: false,
     won: false,
   };
+  world.lightRadius = lightRadius(world);
   startWave(world);
   return world;
 }
 
-/** Fill the arena for the world's current wave: its sentinels, its shards, and a boss on wave 10. */
+/** Fill the arena for the world's current wave: its enemy mix, its shards, a boss on wave 10. */
 export function startWave(world) {
   const spec = waveSpec(world.wave);
   world.spec = spec;
   world.collected = 0;
-  world.waveBanner = 2.2;
-  for (let i = 0; i < spec.sentinels; i += 1) {
-    spawnSentinel(world, world.random, spec.speedMul, false);
+  world.waveBanner = 2.6;
+  for (let i = 0; i < spec.patrollers; i += 1) {
+    spawnSentinel(world, world.random, spec.speedMul, 'patroller');
+  }
+  for (let i = 0; i < spec.chasers; i += 1) {
+    spawnSentinel(world, world.random, spec.speedMul, 'chaser');
+  }
+  for (let i = 0; i < spec.splitters; i += 1) {
+    spawnSentinel(world, world.random, spec.speedMul, 'splitter');
   }
   if (spec.boss) {
-    spawnSentinel(world, world.random, spec.speedMul, true);
+    spawnSentinel(world, world.random, spec.speedMul, 'boss');
   }
   for (let i = 0; i < spec.shardQuota + 4; i += 1) {
     spawnShard(world, world.random);
+  }
+  // A bounty wave pays out in banked shards; a boss wave is announced, not gifted.
+  if (spec.modifier === 'bounty') {
+    world.bank += 5;
+    spawnPowerup(world, world.random);
   }
 }
 
@@ -77,10 +115,27 @@ export function resetWorld(world) {
 }
 
 /**
+ * Spend banked shards on a prisma at the player's feet. Returns true when one was
+ * placed, false when the bank is short or the field already holds the maximum.
+ */
+export function placePrism(world) {
+  if (world.over || world.won) return false;
+  if (world.bank < PRISM.cost) return false;
+  if (world.prisms.length >= PRISM.max) return false;
+  world.bank -= PRISM.cost;
+  world.stats.prismsPlaced += 1;
+  spawnPrism(world);
+  world.lightRadius = lightRadius(world);
+  burst(world, world.player.x, world.player.y, '#7df9ff', 18, 220);
+  floater(world, world.player.x, world.player.y - 26, `PRISM −${PRISM.cost}✦`, '#7df9ff');
+  return true;
+}
+
+/**
  * Advance the world one fixed step. `input` steers the player; the return is the events
- * of this step (pickup, hit, powerup, wave, win, over), each with what the main loop needs
- * to score it and play its sound. Returns 0 when nothing happened, else a bitmask-free
- * list the caller drains in order.
+ * of this step (pickup, hit, powerup, kill, prism, wave, win, over), each with what the
+ * main loop needs to score it and play its sound. Returns 0 when nothing happened, else
+ * a bitmask-free list the caller drains in order.
  */
 export function stepWorld(world, input, dt) {
   if (world.over || world.won) return [];
@@ -94,10 +149,40 @@ export function stepWorld(world, input, dt) {
     if (world.comboTimer <= 0) world.combo = 0;
   }
 
+  // The dark closes in: the lamp drains, faster on surge waves and at the boss.
+  const drain = LIGHT.drainPerSecond
+    * (world.spec.modifier === 'surge' ? LIGHT.surgeDrainMul : 1)
+    * (world.spec.modifier === 'boss' ? LIGHT.bossDrainMul : 1);
+  world.light = Math.max(0, world.light - drain * dt);
+  world.lightRadius = lightRadius(world);
+
   updatePlayer(world, input, dt);
   updateSentinels(world, dt);
   updateShards(world, dt);
   updatePowerups(world, dt);
+  updatePrisms(world, dt);
+  for (const event of updateBeams(world, dt)) {
+    events.push(event);
+  }
+  // Trickle spawns: the dark keeps sending sentinels while the wave lasts, so a
+  // cleared field never stays empty for long.
+  world.spawnTimer -= dt;
+  if (world.spawnTimer <= 0) {
+    world.spawnTimer = world.spec.spawnInterval;
+    const total = world.spec.patrollers + world.spec.chasers + world.spec.splitters + (world.spec.boss ? 1 : 0);
+    if (world.sentinels.length < total + 4) {
+      const roll = world.random();
+      const kind = roll < 0.5 ? 'patroller' : roll < 0.8 && world.wave >= 2 ? 'chaser' : world.wave >= 4 ? 'splitter' : 'patroller';
+      spawnSentinel(world, world.random, world.spec.speedMul, kind);
+    }
+  }
+  if (world.beams.length > 0) {
+    world.beamSoundTimer -= dt;
+    if (world.beamSoundTimer <= 0) {
+      world.beamSoundTimer = 0.4;
+      events.push({ type: 'beam' });
+    }
+  }
 
   for (const event of checkCollisions(world)) {
     if (event.type === 'pickup') {
@@ -106,9 +191,14 @@ export function stepWorld(world, input, dt) {
       const gained = Math.round(SHARD.value * (1 + (world.combo - 1) * SHARD.comboStep));
       world.score += gained;
       world.collected += 1;
+      world.bank += 1;
+      world.stats.shardsEaten += 1;
+      world.light = Math.min(LIGHT.max, world.light + LIGHT.shardRestore);
+      world.lightRadius = lightRadius(world);
       burst(world, event.shard.x, event.shard.y, COLORS.shard, 14, 180);
+      floater(world, event.shard.x, event.shard.y - 14, `+${gained}`, COLORS.shard);
       events.push({ type: 'pickup', gained, combo: world.combo });
-      if (world.random() < POWERUP.dropChance && world.powerups.length < 2) {
+      if (world.random() < POWERUP.dropChance * (world.spec.modifier === 'bounty' ? 2 : 1) && world.powerups.length < 2) {
         spawnPowerup(world, world.random);
       }
       if (world.collected >= world.spec.shardQuota) {

@@ -1,15 +1,19 @@
 // The things that live in the arena and how they move and meet. The world is one plain
-// object (made in levels.js): player, shards, sentinels, powerups, particles, and the run's
-// score, combo, lives, wave and timers. Every update here takes (world, dt) and, where it
-// matters, the input; collisions return events the main loop turns into sound and score.
+// object (made in levels.js): player, shards, sentinels, prisms, beams, powerups,
+// particles, floaters, and the run's score, combo, lives, wave, light, bank and timers.
+// Every update here takes (world, dt) and, where it matters, the input; collisions and
+// beam kills return events the main loop turns into sound and score.
 
 import {
-  BOSS,
+  ENEMY,
   FIELD,
+  KILL_SCORE,
+  LIGHT,
   PLAYER,
   POWERUP,
-  SENTINEL,
+  PRISM,
   SHARD,
+  SPAWN_SAFE_RADIUS,
 } from './config.js';
 import { pick, randRange } from './random.js';
 
@@ -48,9 +52,13 @@ export function spawnShard(world, random) {
   });
 }
 
-/** A sentinel with two or three patrol points; a boss is bigger, faster and hunts further. */
-export function spawnSentinel(world, random, speedMul, isBoss) {
-  const spec = isBoss ? BOSS : SENTINEL;
+/**
+ * A sentinel of the given kind. Kinds differ in speed, size, toughness and temper:
+ * patrollers drift their routes, chasers hunt, splitters die into two minis, minis are
+ * quick and small, and the boss is big, fast and breeds minions.
+ */
+export function spawnSentinel(world, random, speedMul, kind) {
+  const spec = ENEMY[kind] || ENEMY.patroller;
   let x = 0;
   let y = 0;
   for (let tries = 0; tries < 12; tries += 1) {
@@ -58,7 +66,7 @@ export function spawnSentinel(world, random, speedMul, isBoss) {
     y = randRange(random, 64, FIELD.height - 48);
     const dx = x - world.player.x;
     const dy = y - world.player.y;
-    if (dx * dx + dy * dy > SENTINEL.spawnSafeRadius * SENTINEL.spawnSafeRadius) break;
+    if (dx * dx + dy * dy > SPAWN_SAFE_RADIUS * SPAWN_SAFE_RADIUS) break;
   }
   const waypoints = [];
   for (let i = 0; i < 3; i += 1) {
@@ -72,15 +80,31 @@ export function spawnSentinel(world, random, speedMul, isBoss) {
     y,
     vx: 0,
     vy: 0,
+    kind,
     radius: spec.radius,
-    speed: spec.baseSpeed * speedMul,
+    hp: spec.hp,
+    maxHp: spec.hp,
+    speed: spec.speed * speedMul,
     chaseRadius: spec.chaseRadius,
-    chaseMul: isBoss ? 1.35 : SENTINEL.chaseSpeedMul,
+    chaseMul: spec.chaseMul,
     waypoints,
     waypoint: 0,
-    boss: isBoss,
+    boss: kind === 'boss',
     minionTimer: 4,
     phase: random() * Math.PI * 2,
+  });
+}
+
+/** A prisma where the player stands: it bends the player's light into a burning beam. */
+export function spawnPrism(world) {
+  const p = world.player;
+  world.prisms.push({
+    x: p.x,
+    y: p.y,
+    radius: PRISM.radius,
+    ttl: PRISM.ttl,
+    maxTtl: PRISM.ttl,
+    phase: world.random() * Math.PI * 2,
   });
 }
 
@@ -113,6 +137,11 @@ export function burst(world, x, y, color, count, speed) {
       size: 2 + world.random() * 3,
     });
   }
+}
+
+/** Floating score text that rises and fades: the reward you can read. */
+export function floater(world, x, y, text, color) {
+  world.floaters.push({ x, y, text, color, life: 1.1, maxLife: 1.1 });
 }
 
 /** Steer the player by keys (or toward the held mouse), with acceleration and friction. */
@@ -150,17 +179,24 @@ export function updatePlayer(world, input, dt) {
   if (p.magnet > 0) p.magnet -= dt;
 }
 
-/** Sentinels patrol their waypoints and chase the player when close; the boss also breeds minions. */
+/**
+ * Sentinels patrol their waypoints and chase the player when close; minis and chasers
+ * hunt harder, the boss also breeds minions. Inside the player's light they slow down;
+ * when the light dies the dark speeds them up. Returns nothing; the world is the record.
+ */
 export function updateSentinels(world, dt) {
   const p = world.player;
   const slowMul = p.slow > 0 ? POWERUP.slowMul : 1;
+  const lightR = world.lightRadius;
+  const dark = world.light <= 0.01;
   for (const s of world.sentinels) {
     const dx = p.x - s.x;
     const dy = p.y - s.y;
     const dist = Math.hypot(dx, dy) || 1;
     let tx = 0;
     let ty = 0;
-    if (dist < s.chaseRadius) {
+    // Minis never patrol: they always hunt. The rest chase inside their radius.
+    if (s.kind === 'mini' || dist < s.chaseRadius) {
       tx = dx / dist;
       ty = dy / dist;
     } else {
@@ -175,7 +211,9 @@ export function updateSentinels(world, dt) {
         ty = wy / wd;
       }
     }
-    const speed = s.speed * (dist < s.chaseRadius ? s.chaseMul : 1) * slowMul;
+    let speed = s.speed * (dist < s.chaseRadius || s.kind === 'mini' ? s.chaseMul : 1) * slowMul;
+    if (dist < lightR) speed *= LIGHT.slowInLight;
+    if (dark) speed *= LIGHT.darkSpeedMul;
     s.vx += (tx * speed - s.vx) * Math.min(1, dt * 4);
     s.vy += (ty * speed - s.vy) * Math.min(1, dt * 4);
     s.x = Math.min(FIELD.width - s.radius, Math.max(s.radius, s.x + s.vx * dt));
@@ -184,10 +222,85 @@ export function updateSentinels(world, dt) {
     if (s.boss) {
       s.minionTimer -= dt;
       const minions = world.sentinels.filter((o) => !o.boss).length;
-      if (s.minionTimer <= 0 && minions < BOSS.minions + world.wave) {
+      if (s.minionTimer <= 0 && minions < ENEMY.boss.minions + world.wave) {
         s.minionTimer = 6;
-        spawnSentinel(world, world.random, world.spec.speedMul, false);
+        spawnSentinel(world, world.random, world.spec.speedMul, 'mini');
       }
+    }
+  }
+}
+
+/**
+ * Each prisma aims its beam at the nearest sentinel in range and burns it. A beam that
+ * kills returns an event with the score; a splitter's death spawns two minis. The live
+ * beams are left in world.beams for the renderer to draw.
+ */
+export function updateBeams(world, dt) {
+  const events = [];
+  world.beams = [];
+  for (const prism of world.prisms) {
+    let target = null;
+    let bestD = PRISM.range * PRISM.range;
+    for (const s of world.sentinels) {
+      const dx = s.x - prism.x;
+      const dy = s.y - prism.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        target = s;
+      }
+    }
+    if (!target) continue;
+    world.beams.push({ x1: prism.x, y1: prism.y, x2: target.x, y2: target.y, kind: target.kind });
+    target.hp -= PRISM.damagePerSecond * dt;
+    // Burn sparks where the beam lands, so a hit reads even at a glance.
+    if (world.random() < 0.5) {
+      world.particles.push({
+        x: target.x + (world.random() - 0.5) * target.radius * 2,
+        y: target.y + (world.random() - 0.5) * target.radius * 2,
+        vx: (world.random() - 0.5) * 120,
+        vy: (world.random() - 0.5) * 120,
+        life: 0.3,
+        maxLife: 0.3,
+        color: '#aef7ff',
+        size: 2 + world.random() * 2,
+      });
+    }
+    if (target.hp <= 0) {
+      const idx = world.sentinels.indexOf(target);
+      if (idx >= 0) world.sentinels.splice(idx, 1);
+      const value = KILL_SCORE[target.kind] || 50;
+      world.score += value;
+      world.stats.kills += 1;
+      burst(world, target.x, target.y, '#aef7ff', 20, 260);
+      floater(world, target.x, target.y - 10, `+${value}`, '#aef7ff');
+      events.push({ type: 'kill', kind: target.kind, value, x: target.x, y: target.y });
+      if (target.kind === 'splitter') {
+        for (let i = 0; i < 2; i += 1) {
+          spawnSentinel(world, world.random, world.spec.speedMul, 'mini');
+          const mini = world.sentinels[world.sentinels.length - 1];
+          mini.x = Math.min(FIELD.width - mini.radius, Math.max(mini.radius, target.x + (i === 0 ? -24 : 24)));
+          mini.y = Math.min(FIELD.height - mini.radius, Math.max(mini.radius, target.y + (i === 0 ? -14 : 14)));
+        }
+        events.push({ type: 'split', x: target.x, y: target.y });
+      }
+      if (target.boss) {
+        events.push({ type: 'bossDown', score: world.score });
+      }
+    }
+  }
+  return events;
+}
+
+/** Prisms fade out after their time; a spent prisma leaves a few sparks behind. */
+export function updatePrisms(world, dt) {
+  for (let i = world.prisms.length - 1; i >= 0; i -= 1) {
+    const prism = world.prisms[i];
+    prism.ttl -= dt;
+    prism.phase += dt * 2;
+    if (prism.ttl <= 0) {
+      burst(world, prism.x, prism.y, '#7df9ff', 10, 140);
+      world.prisms.splice(i, 1);
     }
   }
 }
@@ -210,7 +323,7 @@ export function updateShards(world, dt) {
   }
 }
 
-/** Power-ups fade out after their time; particles drift and die. */
+/** Power-ups fade out after their time; particles drift and die; floaters rise and fade. */
 export function updatePowerups(world, dt) {
   for (let i = world.powerups.length - 1; i >= 0; i -= 1) {
     world.powerups[i].ttl -= dt;
@@ -225,6 +338,12 @@ export function updatePowerups(world, dt) {
     pt.vx *= 0.96;
     pt.vy *= 0.96;
     if (pt.life <= 0) world.particles.splice(i, 1);
+  }
+  for (let i = world.floaters.length - 1; i >= 0; i -= 1) {
+    const f = world.floaters[i];
+    f.life -= dt;
+    f.y -= 34 * dt;
+    if (f.life <= 0) world.floaters.splice(i, 1);
   }
 }
 

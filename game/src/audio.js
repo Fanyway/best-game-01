@@ -12,6 +12,7 @@ export function createAudio() {
   let context = null;
   let muted = false;
   let master = null;
+  let ambientStarted = false;
 
   function ensure() {
     if (context) return context;
@@ -24,10 +25,40 @@ export function createAudio() {
     return context;
   }
 
+  /** A low drone under the game: two detuned sines through a slow swell, very quiet. */
+  function startAmbient() {
+    if (ambientStarted) return;
+    const ctx = ensure();
+    if (!ctx || !master) return;
+    ambientStarted = true;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.05;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 320;
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.frequency.value = 0.07;
+    lfoGain.gain.value = 0.02;
+    lfo.connect(lfoGain);
+    lfoGain.connect(gain.gain);
+    lfo.start();
+    for (const freq of [55, 82.5, 110.3]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(filter);
+      osc.start();
+    }
+    filter.connect(gain);
+    gain.connect(master);
+  }
+
   /** Start the audio context (call from a click or key press). */
   function unlock() {
     const ctx = ensure();
     if (ctx && ctx.state === 'suspended') ctx.resume();
+    startAmbient();
   }
 
   /** One tone: an oscillator that rises or falls, then fades out. */
@@ -86,6 +117,30 @@ export function createAudio() {
     /** A power-up collected: a soft two-note lift. */
     powerup() {
       chord('sine', [660, 990], 0.22, 0.4);
+    },
+
+    /** A prisma placed: a bright glass chime. */
+    prism() {
+      chord('sine', [1174, 1568, 2093], 0.3, 0.3);
+      tone('triangle', 880, 1760, 0.25, 0.25);
+    },
+
+    /** A beam burning: a short electric zap, kept quiet so it never shouts. */
+    beam() {
+      tone('sawtooth', 1400, 900, 0.09, 0.12);
+      tone('sine', 2100, 1800, 0.08, 0.1);
+    },
+
+    /** A splitter bursting into minis: a quick pop. */
+    split() {
+      tone('square', 520, 180, 0.12, 0.3);
+      tone('sine', 780, 1560, 0.1, 0.2);
+    },
+
+    /** A sentinel burned down: a falling shimmer. */
+    burn() {
+      tone('triangle', 990, 220, 0.25, 0.3);
+      tone('sine', 1320, 440, 0.2, 0.2);
     },
 
     /** The boss wave begins: a warning swell. */

@@ -1,18 +1,18 @@
-// The screenshot scenes behind ?shot=title|play|intense|over. Each one plays the real rules
+// The screenshot scenes behind ?shot=title|play|intense|win. Each one plays the real rules
 // forward from a fresh world for a fixed number of steps, steered by a simple autopilot, so
 // the frame is what a short game really looks like and the same seed always gives the same
-// frame. The title scene drifts with no input; the play scenes chase shards and flee
-// sentinels; the over scene plays a careful run first and ends it after a minute
-// or so, as a player who lasted a few waves is.
+// frame. The title scene drifts with no input; the play scenes chase shards, flee
+// sentinels and spend banked shards on prisms; the win scene plays a full winning run
+// (and, if the pilot falls short, ends it as a win with the score it earned).
 
-import { STEP } from './config.js';
-import { stepWorld } from './levels.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+import { PRISM, STEP } from './config.js';
+import { placePrism, stepWorld } from './levels.js';
+import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 
 const TITLE_SECONDS = 4;
 const PLAY_SECONDS = 22;
 const INTENSE_SECONDS = 95;
-const OVER_SECONDS = 90;
+const WIN_SECONDS = 240;
 const FLEE_RADIUS = 170;
 
 /** The autopilot's steering: toward the nearest shard, away from near sentinels. */
@@ -33,8 +33,10 @@ function autopilot(world) {
   }
   if (bestShard) {
     const d = Math.sqrt(bestD) || 1;
-    sx += (bestShard.x - p.x) / d;
-    sy += (bestShard.y - p.y) / d;
+    // A starving lamp chases harder: shards are light as well as score.
+    const urgency = world.light < 25 ? 1.6 : 1;
+    sx += ((bestShard.x - p.x) / d) * urgency;
+    sy += ((bestShard.y - p.y) / d) * urgency;
   }
   // When the shard is close, chase wins over flee: otherwise the two pulls cancel
   // and the pilot creeps forever in front of a guarded shard.
@@ -73,29 +75,48 @@ const idleInput = {
   mouse: () => null,
 };
 
+/** The pilot's prisma sense: spend the bank when a sentinel is close enough to burn. */
+function pilotPrism(world) {
+  if (world.bank < PRISM.cost) return;
+  if (world.prisms.length >= PRISM.max) return;
+  const p = world.player;
+  for (const s of world.sentinels) {
+    const dx = s.x - p.x;
+    const dy = s.y - p.y;
+    if (dx * dx + dy * dy < 480 * 480) {
+      placePrism(world);
+      return;
+    }
+  }
+}
+
 /**
- * Set `world` to the named scene (title, play, intense or over; any other name is title)
+ * Set `world` to the named scene (title, play, intense or win; any other name is title)
  * and return the screen to draw over it and the best score to show.
  */
 export function stageShot(name, world) {
-  if (name !== 'play' && name !== 'intense' && name !== 'over') {
+  if (name !== 'play' && name !== 'intense' && name !== 'win') {
     for (let i = 0; i < TITLE_SECONDS / STEP; i += 1) {
       stepWorld(world, idleInput, STEP);
     }
     return { screen: SCREEN_TITLE, best: 0 };
   }
-  // The game-over scene plays a careful run first (a minute or so, a few thousand
-  // points, a few waves in) and only then ends the run; a reckless pilot died in
-  // seconds at wave 1, which makes a thin game-over screen.
-  const limit = name === 'over' ? OVER_SECONDS : name === 'intense' ? INTENSE_SECONDS : PLAY_SECONDS;
+  // The win scene plays a full run with the pilot (a few minutes at most) and ends it
+  // as a win with the score it earned; a pilot that falls short still stages a real win
+  // screen, since the frame is what the screen looks like, not a trophy.
+  const limit = name === 'win' ? WIN_SECONDS : name === 'intense' ? INTENSE_SECONDS : PLAY_SECONDS;
   for (let i = 0; i < limit / STEP; i += 1) {
     if (world.over || world.won) break;
-    if (name === 'intense' && world.wave >= 6) break;
+    if (name === 'intense' && world.wave >= 7) break;
+    pilotPrism(world);
     stepWorld(world, pilotInput(world), STEP);
   }
-  if (name === 'over' && !world.over) {
-    world.lives = 0;
-    world.over = true;
+  if (name === 'win' && !world.won) {
+    world.won = true;
   }
+  if (name === 'win') {
+    return { screen: SCREEN_WIN, best: world.score };
+  }
+  // A pilot that died mid-scene stages the game-over screen it earned.
   return { screen: world.over ? SCREEN_OVER : SCREEN_PLAY, best: world.score };
 }
