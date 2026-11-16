@@ -7,8 +7,11 @@
 // outside the player's light, and beams that cut through it. Prisms that link wear a teal
 // chain between them, and a wave clear washes the arena in gold. Every enemy kind reads
 // at a glance — spiky patroller, diamond chaser, hex splitter, tiny mini, crowned boss.
+// v4: on eclipse waves a dead sun hangs over the arena, the dark turns violet, and pale
+// wraiths drift in — a veiled wraith wears a white ring, the tell that the light shields it.
 
 import { COLORS, FIELD, LIGHT, MODIFIER_LABEL, PRISM } from './config.js';
+import { isVeiled } from './entities.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -169,6 +172,32 @@ export function createRenderer(canvas) {
     ctx.strokeStyle = COLORS.border;
     ctx.lineWidth = 3;
     ctx.strokeRect(1.5, 1.5, FIELD.width - 3, FIELD.height - 3);
+    // The dead sun (v4): on eclipse waves a black disc with a violet corona hangs
+    // over the arena, so the phase reads before a single word is read. It sits below
+    // the HUD's wave and timer lines, clear of them, so the whole disc shows.
+    if (world.spec.modifier === 'eclipse') {
+      const sx = FIELD.width / 2;
+      const sy = 172;
+      ctx.save();
+      ctx.shadowColor = COLORS.wraithVeil;
+      ctx.shadowBlur = 34;
+      ctx.strokeStyle = COLORS.wraithVeil;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 42, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#05060f';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.gold;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 38, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /** The dark outside the player's light: a radial gradient, clear near the orb, night at the edge. */
@@ -176,11 +205,14 @@ export function createRenderer(canvas) {
     const p = world.player;
     const r = world.lightRadius;
     const surge = world.spec.modifier === 'surge' ? 0.06 : 0;
-    const alpha = Math.min(0.92, 0.5 + 0.38 * (1 - world.light / LIGHT.max) + surge);
+    const eclipse = world.spec.modifier === 'eclipse';
+    const alpha = Math.min(0.94, 0.5 + 0.38 * (1 - world.light / LIGHT.max) + surge + (eclipse ? 0.05 : 0));
+    // An eclipse tints the dark violet, so the phase reads in the dark itself.
+    const base = eclipse ? '16, 6, 32' : '3, 4, 12';
     const g = ctx.createRadialGradient(p.x, p.y, r * 0.35, p.x, p.y, r * 1.7);
-    g.addColorStop(0, 'rgba(3, 4, 12, 0)');
-    g.addColorStop(0.55, `rgba(3, 4, 12, ${(alpha * 0.55).toFixed(2)})`);
-    g.addColorStop(1, `rgba(3, 4, 12, ${alpha.toFixed(2)})`);
+    g.addColorStop(0, `rgba(${base}, 0)`);
+    g.addColorStop(0.55, `rgba(${base}, ${(alpha * 0.55).toFixed(2)})`);
+    g.addColorStop(1, `rgba(${base}, ${alpha.toFixed(2)})`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, FIELD.width, FIELD.height);
   }
@@ -203,12 +235,42 @@ export function createRenderer(canvas) {
   }
 
   /** One sentinel, drawn by kind so each reads at a glance. */
-  function drawSentinel(s) {
+  function drawSentinel(world, s) {
     const pulse = 1 + 0.08 * Math.sin(s.phase * 2);
     const r = s.radius * pulse;
     ctx.save();
     ctx.translate(s.x, s.y);
-    if (s.kind === 'chaser') {
+    if (s.kind === 'wraith') {
+      // A pale ghost: a rounded head over a wavy sheet, lavender glow, hollow eyes.
+      ctx.fillStyle = COLORS.wraith;
+      ctx.shadowColor = COLORS.wraithVeil;
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(0, -r * 0.25, r * 0.85, Math.PI, 0);
+      ctx.lineTo(r * 0.85, r * 0.8);
+      for (let i = 0; i < 3; i += 1) {
+        const wx = r * 0.85 - (i + 0.5) * ((r * 1.7) / 3);
+        ctx.quadraticCurveTo(wx, r * (0.8 + (i % 2 === 0 ? 0.35 : -0.1)), r * 0.85 - (i + 1) * ((r * 1.7) / 3), r * 0.8);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#1a1030';
+      ctx.beginPath();
+      ctx.arc(-r * 0.3, -r * 0.3, r * 0.16, 0, Math.PI * 2);
+      ctx.arc(r * 0.3, -r * 0.3, r * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+      // The veil: a white ring while the light shields it — the ring is the tell.
+      if (isVeiled(world, s)) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.6 + 0.4 * Math.sin(s.phase * 3);
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 1.45, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    } else if (s.kind === 'chaser') {
       // A magenta diamond with two eyes, always pointing at the player.
       ctx.fillStyle = COLORS.chaser;
       ctx.shadowColor = COLORS.chaser;
@@ -517,7 +579,12 @@ export function createRenderer(canvas) {
     text(`WAVE ${world.wave} / 10`, FIELD.width / 2, 30, 24, COLORS.text, 800);
     const modLabel = MODIFIER_LABEL[world.spec.modifier];
     if (modLabel) {
-      text(modLabel, FIELD.width / 2, 58, 15, world.spec.modifier === 'surge' ? COLORS.danger : COLORS.prism, 700);
+      const modColor = world.spec.modifier === 'surge' ? COLORS.danger : world.spec.modifier === 'eclipse' ? COLORS.wraithVeil : COLORS.prism;
+      text(modLabel, FIELD.width / 2, 58, 15, modColor, 700);
+    }
+    // The eclipse rule, at the bottom where the eye rests: what pays, what hides.
+    if (world.spec.modifier === 'eclipse') {
+      text('ECLIPSE — KILLS ×2  •  WRAITHS HIDE IN LIGHT, BURN THEM IN THE DARK', FIELD.width / 2, FIELD.height - 24, 15, COLORS.wraithVeil, 700);
     }
     const mins = Math.floor(world.time / 60);
     const secs = Math.floor(world.time % 60);
@@ -589,14 +656,16 @@ export function createRenderer(canvas) {
     ctx.shadowBlur = 32;
     text('LUMEN DRIFT', FIELD.width / 2, 170, 84, COLORS.player, 900);
     ctx.restore();
-    text('Pilot the light. Chain your prisms. Weave a net of light.', FIELD.width / 2, 232, 24, COLORS.text, 600);
+    text('Pilot the light. Chain your prisms. Beware the eclipse.', FIELD.width / 2, 232, 24, COLORS.text, 600);
     text('The dark closes in as your lamp drains — shards feed it back. Bank shards to widen', FIELD.width / 2, 282, 19, COLORS.dim, 500);
     text('your light, or spend 8✦ on a PRISM (Q): it bends light into a beam that burns sentinels.', FIELD.width / 2, 310, 19, COLORS.dim, 500);
     text('Prisms close together LINK into a chain that burns anything it touches — linked prisms', FIELD.width / 2, 338, 19, COLORS.link, 600);
     text('burn 25% harder, and chain kills pay 25% extra. Cluster for a web, or spread for range.', FIELD.width / 2, 364, 19, COLORS.link, 600);
-    text('Clear wave 10 to win. Patrollers drift, chasers hunt, splitters burst into minis.', FIELD.width / 2, 392, 19, COLORS.dim, 500);
-    text('Arrows / WASD to fly  •  hold mouse to steer  •  Q prism  •  P pause  •  M mute  •  R restart', FIELD.width / 2, 424, 18, COLORS.dim, 500);
-    text('S = shield, T = slow time, U = magnet. Inside your light, sentinels slow down.', FIELD.width / 2, 450, 18, COLORS.dim, 500);
+    text('Every third wave the sun dies: an ECLIPSE. Kills pay double, prisms link farther —', FIELD.width / 2, 392, 19, COLORS.wraithVeil, 600);
+    text('but WRAITHS rise, pale ghosts that hide in your light. Lure them into the dark to burn them.', FIELD.width / 2, 418, 19, COLORS.wraithVeil, 600);
+    text('Clear wave 10 to win. Patrollers drift, chasers hunt, splitters burst into minis.', FIELD.width / 2, 444, 19, COLORS.dim, 500);
+    text('Arrows / WASD to fly  •  hold mouse to steer  •  Q prism  •  P pause  •  M mute  •  R restart', FIELD.width / 2, 472, 18, COLORS.dim, 500);
+    text('S = shield, T = slow time, U = magnet. Inside your light, sentinels slow down.', FIELD.width / 2, 496, 18, COLORS.dim, 500);
     drawButton(BUTTONS.play, 'PLAY', COLORS.player);
     if (best > 0) text(`BEST SCORE ${best}`, FIELD.width / 2, 620, 20, COLORS.gold, 700);
   }
@@ -622,6 +691,9 @@ export function createRenderer(canvas) {
     text(`SENTINELS BURNED  ${world.stats.kills}    •    PRISMS PLACED  ${world.stats.prismsPlaced}`, FIELD.width / 2, 424, 19, COLORS.prism, 700);
     if (world.stats.chainKills > 0) {
       text(`CHAIN KILLS  ${world.stats.chainKills}    •    BIGGEST WEB  ${world.stats.maxLinks} LINK${world.stats.maxLinks === 1 ? '' : 'S'}`, FIELD.width / 2, 454, 19, COLORS.link, 700);
+    }
+    if (world.stats.wraithsBurned > 0) {
+      text(`WRAITHS BURNED  ${world.stats.wraithsBurned}`, FIELD.width / 2, 484, 19, COLORS.wraithVeil, 700);
     }
     drawButton(BUTTONS.restart, 'PLAY AGAIN', COLORS.gold);
   }
@@ -658,7 +730,7 @@ export function createRenderer(canvas) {
       for (const shard of world.shards) drawShard(shard);
       for (const p of world.powerups) drawPowerup(p);
       for (const prism of world.prisms) drawPrism(prism);
-      for (const s of world.sentinels) drawSentinel(s);
+      for (const s of world.sentinels) drawSentinel(world, s);
       drawParticles(world);
       if (screen !== SCREEN_TITLE) drawPlayer(world.player, world.time);
       if (screen === SCREEN_PLAY || screen === SCREEN_PAUSED) drawDarkness(world);
@@ -688,7 +760,7 @@ export function createRenderer(canvas) {
         const banner = world.wave === 10 ? 'FINAL WAVE — THE BOSS' : `WAVE ${world.wave}`;
         ctx.globalAlpha = Math.min(1, world.waveBanner);
         text(banner, FIELD.width / 2, FIELD.height / 2 - 40, 52, COLORS.text, 900);
-        if (modLabel) text(modLabel, FIELD.width / 2, FIELD.height / 2 + 6, 24, COLORS.prism, 800);
+        if (modLabel) text(modLabel, FIELD.width / 2, FIELD.height / 2 + 6, 24, world.spec.modifier === 'eclipse' ? COLORS.wraithVeil : COLORS.prism, 800);
         ctx.globalAlpha = 1;
       }
       if (screen === SCREEN_TITLE) drawTitle(world, ui.best);

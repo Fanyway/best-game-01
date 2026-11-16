@@ -10,7 +10,7 @@ import { placePrism, stepWorld } from './levels.js';
 import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 
 const TITLE_SECONDS = 4;
-const PLAY_SECONDS = 22;
+const PLAY_SECONDS = 60;
 const INTENSE_SECONDS = 95;
 const WIN_SECONDS = 240;
 const FLEE_RADIUS = 170;
@@ -58,8 +58,9 @@ function autopilot(world) {
   return { x: sx / len, y: sy / len };
 }
 
-/** A fake input object the autopilot steers with. */
-function pilotInput(world) {
+/** A fake input object the autopilot steers with. Exported for the sweep harness, so
+ * the balance test drives with the same pilot the screenshots use. */
+export function pilotInput(world) {
   const axis = autopilot(world);
   return {
     axis: () => axis,
@@ -77,8 +78,8 @@ const idleInput = {
 
 /** The pilot's prisma sense: spend the bank when a sentinel is close enough to burn.
  * It prefers dropping a prisma near one already placed, so the two LINK into a chain —
- * the pilot plays the v3 mechanic, it does not ignore it. */
-function pilotPrism(world) {
+ * the pilot plays the v3 mechanic, it does not ignore it. Exported for the sweep. */
+export function pilotPrism(world) {
   if (world.bank < PRISM.cost) return;
   if (world.prisms.length >= PRISM.max) return;
   const p = world.player;
@@ -123,7 +124,11 @@ export function stageShot(name, world) {
   const limit = name === 'win' ? WIN_SECONDS : name === 'intense' ? INTENSE_SECONDS : PLAY_SECONDS;
   for (let i = 0; i < limit / STEP; i += 1) {
     if (world.over || world.won) break;
-    if (name === 'intense' && world.wave >= 7) break;
+    // v4: the play scene runs into the first eclipse (wave 3) and the intense scene
+    // into the second (wave 6), so both frames show wraiths under the dead sun —
+    // the frame is taken once the wave banner has faded and the wraiths are out.
+    if (name === 'play' && world.wave >= 3 && world.waveBanner <= 0) break;
+    if (name === 'intense' && world.wave >= 6 && world.waveBanner <= 0) break;
     pilotPrism(world);
     stepWorld(world, pilotInput(world), STEP);
   }

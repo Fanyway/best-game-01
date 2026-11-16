@@ -8,6 +8,11 @@
 // anything it touches, and a linked prisma's own beam burns 25% harder. Placing prisms
 // is now a network, not a scatter: cluster them for a burning web, or spread them wide
 // for coverage. A chain kill pays 25% extra — the web rewards the bold.
+// v4: the ECLIPSE. Every third wave the sun dies: kills pay double and prisms link
+// farther — but WRAITHS rise, pale sentinels that hide in your light. A beam cannot
+// burn a wraith inside your light; lure it into the dark, or spend bank to shrink
+// your lamp and expose it. The dark is no longer just the enemy: during an eclipse,
+// it is also your weapon.
 
 /** Logical playfield, in pixels. The canvas scales to the window; the game always thinks in these. */
 export const FIELD = { width: 1280, height: 720 };
@@ -34,6 +39,9 @@ export const COLORS = {
   chaserCore: '#ff9ed2',
   splitter: '#ffb703',
   splitterCore: '#ffe08a',
+  wraith: '#e6e6fa',
+  wraithCore: '#ffffff',
+  wraithVeil: '#b8b8ff',
   mini: '#ff9f1c',
   boss: '#ff2e63',
   beam: '#aef7ff',
@@ -119,8 +127,26 @@ export const KILL_SCORE = {
   patroller: 50,
   chaser: 60,
   splitter: 70,
+  wraith: 80,
   mini: 25,
   boss: 500,
+};
+
+/**
+ * The eclipse (v4): every third wave the sun dies. The lamp drains faster and the
+ * dark deepens, but every kill pays double and prism links reach farther. Wraiths
+ * rise only on eclipse waves — they hide in your light, so the dark is the weapon.
+ */
+export const ECLIPSE = {
+  drainMul: 1.6,
+  killScoreMul: 2,
+  linkRange: 500,
+};
+
+/** A wraith: what it is worth to burn, and how it hunts. */
+export const WRAITH = {
+  hp: 2,
+  speed: 85,
 };
 
 /**
@@ -132,6 +158,7 @@ export const ENEMY = {
   patroller: { radius: 18, speed: 95, hp: 3, chaseRadius: 200, chaseMul: 1.4 },
   chaser: { radius: 14, speed: 150, hp: 2, chaseRadius: 330, chaseMul: 1.15 },
   splitter: { radius: 20, speed: 80, hp: 3, chaseRadius: 260, chaseMul: 1.3 },
+  wraith: { radius: 16, speed: 85, hp: 2, chaseRadius: 380, chaseMul: 1.3 },
   mini: { radius: 10, speed: 175, hp: 1, chaseRadius: 320, chaseMul: 1.1 },
   boss: { radius: 34, speed: 130, hp: 30, chaseRadius: 420, chaseMul: 1.35, minions: 3 },
 };
@@ -153,11 +180,12 @@ export const POWERUP = {
 /** Waves. Clearing a wave's shard quota opens the next; wave 10 is the boss wave and ends the game. */
 export const WAVES = { total: 10 };
 
-/** A wave's modifier: calm, darkness surge, rush, prism bounty, or the boss. */
+/** A wave's modifier: calm, darkness surge, rush, prism bounty, eclipse, or the boss. */
 export function waveModifier(n) {
   if (n === WAVES.total) return 'boss';
-  if (n === 3 || n === 6 || n === 8) return 'surge';
-  if (n === 4 || n === 7 || n === 9) return 'rush';
+  if (n === 3 || n === 6 || n === 9) return 'eclipse';
+  if (n === 8) return 'surge';
+  if (n === 4 || n === 7) return 'rush';
   if (n === 5) return 'bounty';
   return 'calm';
 }
@@ -167,6 +195,7 @@ export const MODIFIER_LABEL = {
   surge: 'DARKNESS SURGE',
   rush: 'RUSH WAVE',
   bounty: 'PRISM BOUNTY',
+  eclipse: 'ECLIPSE',
   boss: 'THE BOSS',
 };
 
@@ -178,6 +207,7 @@ export function waveSpec(n) {
     patrollers: Math.min(2 + Math.floor(n * 0.7), 8),
     chasers: n >= 2 ? Math.min(n - 1, 5) : 0,
     splitters: n >= 4 ? Math.min(Math.floor((n - 2) / 2), 3) : 0,
+    wraiths: modifier === 'eclipse' ? (n === 3 ? 1 : 2) : 0,
     speedMul: 1 + 0.05 * (n - 1) + (modifier === 'rush' ? 0.3 : 0),
     shardQuota: 8 + 2 * n,
     boss: n === WAVES.total,

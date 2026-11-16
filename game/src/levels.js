@@ -8,9 +8,13 @@
 // v3: prisms link into chains of light that burn anything they touch, and a linked
 // prisma's beam burns harder. Placement is a network now: cluster for a web, spread
 // for coverage. A wave clear also lights a fanfare pulse across the arena.
+// v4: the eclipse. Every third wave the sun dies: kills pay double, links reach
+// farther, and wraiths rise — pale ghosts that hide in your light. An eclipse clear
+// earns a longer fanfare, and the dark itself is the weapon that burns them.
 
 import {
   COLORS,
+  ECLIPSE,
   FIELD,
   LIGHT,
   LIVES,
@@ -78,7 +82,7 @@ export function createWorld(random) {
     waveBanner: 0,
     beamSoundTimer: 0,
     spawnTimer: 2,
-    stats: { kills: 0, chainKills: 0, maxLinks: 0, prismsPlaced: 0, shardsEaten: 0 },
+    stats: { kills: 0, chainKills: 0, wraithsBurned: 0, maxLinks: 0, prismsPlaced: 0, shardsEaten: 0 },
     over: false,
     won: false,
   };
@@ -101,6 +105,10 @@ export function startWave(world) {
   }
   for (let i = 0; i < spec.splitters; i += 1) {
     spawnSentinel(world, world.random, spec.speedMul, 'splitter');
+  }
+  // Wraiths rise only on eclipse waves: one on the first eclipse, two after.
+  for (let i = 0; i < spec.wraiths; i += 1) {
+    spawnSentinel(world, world.random, spec.speedMul, 'wraith');
   }
   if (spec.boss) {
     spawnSentinel(world, world.random, spec.speedMul, 'boss');
@@ -157,9 +165,11 @@ export function stepWorld(world, input, dt) {
     if (world.comboTimer <= 0) world.combo = 0;
   }
 
-  // The dark closes in: the lamp drains, faster on surge waves and at the boss.
+  // The dark closes in: the lamp drains, faster on surge waves, faster still in an
+  // eclipse, and fastest at the boss.
   const drain = LIGHT.drainPerSecond
     * (world.spec.modifier === 'surge' ? LIGHT.surgeDrainMul : 1)
+    * (world.spec.modifier === 'eclipse' ? ECLIPSE.drainMul : 1)
     * (world.spec.modifier === 'boss' ? LIGHT.bossDrainMul : 1);
   world.light = Math.max(0, world.light - drain * dt);
   world.lightRadius = lightRadius(world);
@@ -181,10 +191,15 @@ export function stepWorld(world, input, dt) {
   world.spawnTimer -= dt;
   if (world.spawnTimer <= 0) {
     world.spawnTimer = world.spec.spawnInterval;
-    const total = world.spec.patrollers + world.spec.chasers + world.spec.splitters + (world.spec.boss ? 1 : 0);
+    const total = world.spec.patrollers + world.spec.chasers + world.spec.splitters + world.spec.wraiths + (world.spec.boss ? 1 : 0);
     if (world.sentinels.length < total + 4) {
       const roll = world.random();
-      const kind = roll < 0.5 ? 'patroller' : roll < 0.8 && world.wave >= 2 ? 'chaser' : world.wave >= 4 ? 'splitter' : 'patroller';
+      // During an eclipse the dark sometimes sends another wraith, never more than
+      // two at once — the veil is a threat, not a flood.
+      const wraithsOut = world.sentinels.filter((s) => s.kind === 'wraith').length;
+      const kind = world.spec.modifier === 'eclipse' && roll < 0.15 && wraithsOut < 2
+        ? 'wraith'
+        : roll < 0.5 ? 'patroller' : roll < 0.8 && world.wave >= 2 ? 'chaser' : world.wave >= 4 ? 'splitter' : 'patroller';
       spawnSentinel(world, world.random, world.spec.speedMul, kind);
     }
   }
@@ -220,7 +235,8 @@ export function stepWorld(world, input, dt) {
         } else {
           world.score += WAVE_CLEAR_BONUS * world.wave;
           world.lives = Math.min(LIVES, world.lives + 1);
-          world.fanfare = 1.4;
+          // An eclipse clear earns a longer fanfare: the gold washes out twice as long.
+          world.fanfare = world.spec.modifier === 'eclipse' ? 2.0 : 1.4;
           world.wave += 1;
           world.sentinels = [];
           events.push({ type: 'wave', wave: world.wave, bonus: WAVE_CLEAR_BONUS * (world.wave - 1) });

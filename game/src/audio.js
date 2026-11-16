@@ -52,6 +52,16 @@ export function createAudio() {
     }
     filter.connect(gain);
     gain.connect(master);
+    // Third layer (v4): a sub drone far below the others — one low sine at D1, barely
+    // there, so the night has a floor under the hum and the shimmer.
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.value = 36.71;
+    const subGain = ctx.createGain();
+    subGain.gain.value = 0.5;
+    sub.connect(subGain);
+    subGain.connect(gain);
+    sub.start();
     // Second layer (v3): a slow shimmer — one quiet pentatonic pluck every few seconds,
     // so the night breathes instead of humming alone.
     const pluckNotes = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
@@ -110,11 +120,27 @@ export function createAudio() {
       tone('sine', base, base * 1.5, 0.14, 0.5);
     },
 
-    /** A wave cleared: a bright three-note rise with a sparkle on top. */
+    /** A wave cleared: a bright four-note rise with a sparkle on top — v4 adds the
+     * fourth note, so a clear sounds like a small fanfare, not a chime. */
     waveClear() {
-      chord('triangle', [523, 659, 784], 0.35, 0.4);
+      chord('triangle', [523, 659, 784, 1046], 0.35, 0.4);
       tone('sine', 1046, 1568, 0.3, 0.25);
       setTimeout(() => tone('sine', 1568, 2093, 0.35, 0.18), 140);
+      setTimeout(() => tone('triangle', 2093, 2093, 0.3, 0.16), 260);
+    },
+
+    /** The eclipse begins: a dark low swell, the sun going out. */
+    eclipse() {
+      tone('sawtooth', 110, 55, 0.9, 0.3);
+      tone('sine', 55, 27.5, 1.1, 0.35);
+      setTimeout(() => tone('sine', 880, 440, 0.5, 0.12), 300);
+    },
+
+    /** A wraith burned: a pale rising shimmer, higher and thinner than a beam kill. */
+    wraithBurn() {
+      tone('sine', 1568, 3136, 0.35, 0.25);
+      tone('triangle', 2093, 1046, 0.3, 0.2);
+      tone('sine', 2637, 1318, 0.25, 0.14);
     },
 
     /** The player was hit: a low thud. */

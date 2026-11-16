@@ -73,7 +73,8 @@ function handleEvents(events) {
     if (event.type === 'link') audio.link();
     if (event.type === 'split') audio.split();
     if (event.type === 'kill') {
-      if (event.linked) audio.chainKill();
+      if (event.kind === 'wraith') audio.wraithBurn();
+      else if (event.linked) audio.chainKill();
       else audio.burn();
     }
     if (event.type === 'bossDown') {
@@ -87,6 +88,7 @@ function handleEvents(events) {
     }
     if (event.type === 'wave') {
       audio.waveClear();
+      if (world.spec.modifier === 'eclipse') audio.eclipse();
       if (event.wave === 10) audio.boss();
       announce(`Wave ${event.wave}. Bonus ${event.bonus}.`);
     }

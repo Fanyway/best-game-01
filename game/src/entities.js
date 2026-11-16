@@ -5,6 +5,7 @@
 // beam kills return events the main loop turns into sound and score.
 
 import {
+  ECLIPSE,
   ENEMY,
   FIELD,
   KILL_SCORE,
@@ -17,6 +18,18 @@ import {
   SPAWN_SAFE_RADIUS,
 } from './config.js';
 import { pick, randRange } from './random.js';
+
+/**
+ * The wraith's veil (v4): a wraith inside the player's light is shielded by it — no
+ * beam or chain can burn it there. Outside the light it burns like any sentinel.
+ * The player reads it at a glance: a veiled wraith wears a white ring.
+ */
+export function isVeiled(world, s) {
+  if (s.kind !== 'wraith') return false;
+  const dx = s.x - world.player.x;
+  const dy = s.y - world.player.y;
+  return dx * dx + dy * dy < world.lightRadius * world.lightRadius;
+}
 
 /** The player orb, fresh in the middle of the arena. */
 export function createPlayer() {
@@ -132,17 +145,25 @@ function killSentinel(world, target, events, linked) {
   if (idx < 0) return;
   world.sentinels.splice(idx, 1);
   const base = KILL_SCORE[target.kind] || 50;
-  const value = linked ? Math.round(base * LINK.killBonusMul) : base;
+  // An eclipse doubles every kill; a chain kill adds its own bonus on top.
+  const eclipseMul = world.spec.modifier === 'eclipse' ? ECLIPSE.killScoreMul : 1;
+  const value = Math.round(base * (linked ? LINK.killBonusMul : 1) * eclipseMul);
   world.score += value;
   world.stats.kills += 1;
+  if (target.kind === 'wraith') world.stats.wraithsBurned += 1;
   if (linked) world.stats.chainKills += 1;
+  const tag = linked && eclipseMul > 1 ? `LINK ×2 +${value}` : linked ? `LINK +${value}` : eclipseMul > 1 ? `×2 +${value}` : `+${value}`;
   if (linked) {
     burst(world, target.x, target.y, '#5eead4', 30, 320);
     burst(world, target.x, target.y, '#aef7ff', 14, 220);
-    floater(world, target.x, target.y - 10, `LINK +${value}`, '#5eead4');
+    floater(world, target.x, target.y - 10, tag, '#5eead4');
+  } else if (target.kind === 'wraith') {
+    burst(world, target.x, target.y, '#e6e6fa', 30, 320);
+    burst(world, target.x, target.y, '#b8b8ff', 14, 220);
+    floater(world, target.x, target.y - 10, tag, '#e6e6fa');
   } else {
     burst(world, target.x, target.y, '#aef7ff', 20, 260);
-    floater(world, target.x, target.y - 10, `+${value}`, '#aef7ff');
+    floater(world, target.x, target.y - 10, tag, '#aef7ff');
   }
   events.push({ type: 'kill', kind: target.kind, value, x: target.x, y: target.y, linked });
   if (target.kind === 'splitter') {
@@ -169,13 +190,15 @@ export function updateLinks(world, dt) {
   const events = [];
   world.links = [];
   for (const prism of world.prisms) prism.linked = false;
+  // During an eclipse the chains reach farther: the dark carries the light.
+  const linkRange = world.spec.modifier === 'eclipse' ? ECLIPSE.linkRange : LINK.range;
   for (let i = 0; i < world.prisms.length; i += 1) {
     for (let j = i + 1; j < world.prisms.length; j += 1) {
       const a = world.prisms[i];
       const b = world.prisms[j];
       const dx = b.x - a.x;
       const dy = b.y - a.y;
-      if (dx * dx + dy * dy > LINK.range * LINK.range) continue;
+      if (dx * dx + dy * dy > linkRange * linkRange) continue;
       a.linked = true;
       b.linked = true;
       world.links.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
@@ -189,6 +212,7 @@ export function updateLinks(world, dt) {
   for (const link of world.links) {
     for (const s of [...world.sentinels]) {
       if (!world.sentinels.includes(s)) continue;
+      if (isVeiled(world, s)) continue;
       if (distToSegment(s.x, s.y, link.x1, link.y1, link.x2, link.y2) > s.radius + 8) continue;
       s.hp -= LINK.damagePerSecond * dt;
       if (world.random() < 0.5) {
@@ -313,8 +337,13 @@ export function updateSentinels(world, dt) {
       }
     }
     let speed = s.speed * (dist < s.chaseRadius || s.kind === 'mini' ? s.chaseMul : 1) * slowMul;
-    if (dist < lightR) speed *= LIGHT.slowInLight;
-    if (dark) speed *= LIGHT.darkSpeedMul;
+    // A wraith is steady in the dark and in the light alike: the lamp neither slows
+    // it nor hurries it. Every other sentinel slows inside the light and speeds up
+    // when the lamp dies.
+    if (s.kind !== 'wraith') {
+      if (dist < lightR) speed *= LIGHT.slowInLight;
+      if (dark) speed *= LIGHT.darkSpeedMul;
+    }
     s.vx += (tx * speed - s.vx) * Math.min(1, dt * 4);
     s.vy += (ty * speed - s.vy) * Math.min(1, dt * 4);
     s.x = Math.min(FIELD.width - s.radius, Math.max(s.radius, s.x + s.vx * dt));
@@ -343,6 +372,9 @@ export function updateBeams(world, dt) {
     let target = null;
     let bestD = PRISM.range * PRISM.range;
     for (const s of world.sentinels) {
+      // A veiled wraith is not a target: the beam would waste itself on the veil.
+      // The prisma aims at the nearest sentinel it can actually burn.
+      if (isVeiled(world, s)) continue;
       const dx = s.x - prism.x;
       const dy = s.y - prism.y;
       const d = dx * dx + dy * dy;
