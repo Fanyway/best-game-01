@@ -52,6 +52,14 @@ export function createAudio() {
     }
     filter.connect(gain);
     gain.connect(master);
+    // Second layer (v3): a slow shimmer — one quiet pentatonic pluck every few seconds,
+    // so the night breathes instead of humming alone.
+    const pluckNotes = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
+    setInterval(() => {
+      if (muted || !context || context.state !== 'running') return;
+      const f = pluckNotes[Math.floor(Math.random() * pluckNotes.length)];
+      tone('sine', f, f * 0.99, 0.9, 0.05);
+    }, 2600);
   }
 
   /** Start the audio context (call from a click or key press). */
@@ -102,10 +110,11 @@ export function createAudio() {
       tone('sine', base, base * 1.5, 0.14, 0.5);
     },
 
-    /** A wave cleared: a bright three-note rise. */
+    /** A wave cleared: a bright three-note rise with a sparkle on top. */
     waveClear() {
       chord('triangle', [523, 659, 784], 0.35, 0.4);
       tone('sine', 1046, 1568, 0.3, 0.25);
+      setTimeout(() => tone('sine', 1568, 2093, 0.35, 0.18), 140);
     },
 
     /** The player was hit: a low thud. */
@@ -123,6 +132,18 @@ export function createAudio() {
     prism() {
       chord('sine', [1174, 1568, 2093], 0.3, 0.3);
       tone('triangle', 880, 1760, 0.25, 0.25);
+    },
+
+    /** Two prisms linked: a soft two-note chime, lower than the prism itself. */
+    link() {
+      chord('sine', [880, 1318], 0.28, 0.28);
+    },
+
+    /** A sentinel burned on a chain: a bright falling shimmer, richer than a beam kill. */
+    chainKill() {
+      tone('triangle', 1174, 294, 0.3, 0.32);
+      tone('sine', 1568, 523, 0.24, 0.22);
+      tone('sine', 2093, 1046, 0.18, 0.14);
     },
 
     /** A beam burning: a short electric zap, kept quiet so it never shouts. */

@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/best-game-01/Fanyway/best-game-01/rank.svg)](https://make.fun/bounty/best-game-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-game-01)
 [![reward](https://make.fun/badge/best-game-01/Fanyway/best-game-01/reward.svg)](https://make.fun/bounty/best-game-01?utm_source=github&utm_medium=readme&utm_campaign=best-game-01)
 
-LUMEN DRIFT — pilot a light orb through a dark arena where **light is a weapon**. Your lamp drains as the dark closes in; shards feed it back. Bank shards to widen your light — or spend 5✦ on a **PRISM (Q)** that bends light into a beam that burns sentinels. Patrollers drift, chasers hunt, splitters burst into minis, and a boss waits on wave 10. Clear all ten waves to win. A complete 2D canvas arcade game: title, HUD (score, combo, light, bank, lives, wave), power-ups, pause, win and game-over screens, synthesized sound with an ambient drone, and restart.
+LUMEN DRIFT — pilot a light orb through a dark arena where **light is a weapon**. Your lamp drains as the dark closes in; shards feed it back. Bank shards to widen your light — or spend 8✦ on a **PRISM (Q)** that bends light into a beam that burns sentinels. Prisms placed close together **LINK** into a chain of light that burns anything it touches; linked prisms burn 25% harder, and chain kills pay 25% extra — cluster them into a web, or spread them for range. Patrollers drift, chasers hunt, splitters burst into minis, and a boss waits on wave 10. Clear all ten waves to win. A complete 2D canvas arcade game: title, HUD (score, combo, light, bank, links, lives, wave), power-ups, pause, win and game-over screens, synthesized sound with an ambient drone and shimmer, and restart.
 
 ## Run it
 

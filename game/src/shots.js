@@ -75,18 +75,34 @@ const idleInput = {
   mouse: () => null,
 };
 
-/** The pilot's prisma sense: spend the bank when a sentinel is close enough to burn. */
+/** The pilot's prisma sense: spend the bank when a sentinel is close enough to burn.
+ * It prefers dropping a prisma near one already placed, so the two LINK into a chain —
+ * the pilot plays the v3 mechanic, it does not ignore it. */
 function pilotPrism(world) {
   if (world.bank < PRISM.cost) return;
   if (world.prisms.length >= PRISM.max) return;
   const p = world.player;
+  let nearSentinel = Infinity;
   for (const s of world.sentinels) {
     const dx = s.x - p.x;
     const dy = s.y - p.y;
-    if (dx * dx + dy * dy < 480 * 480) {
-      placePrism(world);
-      return;
-    }
+    const d = dx * dx + dy * dy;
+    if (d < nearSentinel) nearSentinel = d;
+  }
+  if (nearSentinel > 480 * 480) return;
+  let nearPrism = Infinity;
+  for (const prism of world.prisms) {
+    const dx = prism.x - p.x;
+    const dy = prism.y - p.y;
+    const d = dx * dx + dy * dy;
+    if (d < nearPrism) nearPrism = d;
+  }
+  // Link when a prisma is close by; otherwise place on a near sentinel, or on the first
+  // prisma of the run. A far sentinel alone is not worth the bank.
+  if (nearPrism < 380 * 380) {
+    placePrism(world);
+  } else if (world.prisms.length === 0 || nearSentinel < 300 * 300) {
+    placePrism(world);
   }
 }
 

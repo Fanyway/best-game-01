@@ -3,9 +3,10 @@
 // win, game over). The canvas fills the window; the game always draws in the logical
 // playfield and the renderer scales it to fit, letterboxed.
 //
-// v2 look: a parallax starfield over drifting nebulae, a darkness that swallows the arena
-// outside the player's light, and beams that cut through it. Every enemy kind reads at a
-// glance — spiky patroller, diamond chaser, hex splitter, tiny mini, crowned boss.
+// v3 look: a parallax starfield over drifting nebulae, a darkness that swallows the arena
+// outside the player's light, and beams that cut through it. Prisms that link wear a teal
+// chain between them, and a wave clear washes the arena in gold. Every enemy kind reads
+// at a glance — spiky patroller, diamond chaser, hex splitter, tiny mini, crowned boss.
 
 import { COLORS, FIELD, LIGHT, MODIFIER_LABEL, PRISM } from './config.js';
 
@@ -348,9 +349,19 @@ export function createRenderer(canvas) {
     ctx.beginPath();
     ctx.arc(prism.x, prism.y, prism.radius + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (prism.ttl / prism.maxTtl));
     ctx.stroke();
+    // A linked prisma wears a teal ring, so the web reads even without its chain.
+    if (prism.linked) {
+      ctx.strokeStyle = COLORS.link;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.7 + 0.3 * Math.sin(prism.phase * 2);
+      ctx.beginPath();
+      ctx.arc(prism.x, prism.y, prism.radius + 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
-  /** A beam: a bright core line with a soft halo, jittering like live light. */
+  /** A beam: a bright core line with a soft halo, jittering like live light. Linked beams burn a little thicker. */
   function drawBeam(beam, time) {
     const jitter = (Math.random() - 0.5) * 3;
     const mx = (beam.x1 + beam.x2) / 2 + jitter;
@@ -358,13 +369,13 @@ export function createRenderer(canvas) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.strokeStyle = 'rgba(174, 247, 255, 0.35)';
-    ctx.lineWidth = 9;
+    ctx.lineWidth = beam.linked ? 11 : 9;
     ctx.beginPath();
     ctx.moveTo(beam.x1, beam.y1);
     ctx.quadraticCurveTo(mx, my, beam.x2, beam.y2);
     ctx.stroke();
     ctx.strokeStyle = COLORS.beam;
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = beam.linked ? 5 : 3.5;
     ctx.shadowColor = COLORS.beam;
     ctx.shadowBlur = 16;
     ctx.beginPath();
@@ -376,6 +387,38 @@ export function createRenderer(canvas) {
     ctx.beginPath();
     ctx.arc(beam.x2, beam.y2, 5 + Math.sin(time * 14) * 1.5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  /** A prism link: a teal chain of light between two prisms, with pulses running along it. */
+  function drawLink(link, time) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(94, 234, 212, 0.3)';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(link.x1, link.y1);
+    ctx.lineTo(link.x2, link.y2);
+    ctx.stroke();
+    ctx.strokeStyle = COLORS.link;
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = COLORS.link;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.moveTo(link.x1, link.y1);
+    ctx.lineTo(link.x2, link.y2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Two pulses travel the chain, so the link reads as live current, not a dead line.
+    for (let i = 0; i < 2; i += 1) {
+      const t = (time * 0.45 + i * 0.5) % 1;
+      const px = link.x1 + (link.x2 - link.x1) * t;
+      const py = link.y1 + (link.y2 - link.y1) * t;
+      ctx.fillStyle = COLORS.linkCore;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -468,6 +511,9 @@ export function createRenderer(canvas) {
     ctx.fillRect(24, 110, 110 * Math.max(0, world.light / 100), 6);
     text(`✦ ${world.bank}`, 24, 140, 18, COLORS.gold, 700, 'left');
     text(`◈ ${world.prisms.length}/${PRISM.max}`, 24, 164, 15, COLORS.prism, 700, 'left');
+    if (world.links.length > 0) {
+      text(`LINK ×${world.links.length}`, 24, 188, 15, COLORS.link, 700, 'left');
+    }
     text(`WAVE ${world.wave} / 10`, FIELD.width / 2, 30, 24, COLORS.text, 800);
     const modLabel = MODIFIER_LABEL[world.spec.modifier];
     if (modLabel) {
@@ -543,12 +589,14 @@ export function createRenderer(canvas) {
     ctx.shadowBlur = 32;
     text('LUMEN DRIFT', FIELD.width / 2, 170, 84, COLORS.player, 900);
     ctx.restore();
-    text('Pilot the light. Bend it into a weapon.', FIELD.width / 2, 232, 24, COLORS.text, 600);
+    text('Pilot the light. Chain your prisms. Weave a net of light.', FIELD.width / 2, 232, 24, COLORS.text, 600);
     text('The dark closes in as your lamp drains — shards feed it back. Bank shards to widen', FIELD.width / 2, 282, 19, COLORS.dim, 500);
     text('your light, or spend 8✦ on a PRISM (Q): it bends light into a beam that burns sentinels.', FIELD.width / 2, 310, 19, COLORS.dim, 500);
-    text('Clear wave 10 to win. Patrollers drift, chasers hunt, splitters burst into minis.', FIELD.width / 2, 338, 19, COLORS.dim, 500);
-    text('Arrows / WASD to fly  •  hold mouse to steer  •  Q prism  •  P pause  •  M mute  •  R restart', FIELD.width / 2, 378, 18, COLORS.dim, 500);
-    text('S = shield, T = slow time, U = magnet. Inside your light, sentinels slow down.', FIELD.width / 2, 408, 18, COLORS.dim, 500);
+    text('Prisms close together LINK into a chain that burns anything it touches — linked prisms', FIELD.width / 2, 338, 19, COLORS.link, 600);
+    text('burn 25% harder, and chain kills pay 25% extra. Cluster for a web, or spread for range.', FIELD.width / 2, 364, 19, COLORS.link, 600);
+    text('Clear wave 10 to win. Patrollers drift, chasers hunt, splitters burst into minis.', FIELD.width / 2, 392, 19, COLORS.dim, 500);
+    text('Arrows / WASD to fly  •  hold mouse to steer  •  Q prism  •  P pause  •  M mute  •  R restart', FIELD.width / 2, 424, 18, COLORS.dim, 500);
+    text('S = shield, T = slow time, U = magnet. Inside your light, sentinels slow down.', FIELD.width / 2, 450, 18, COLORS.dim, 500);
     drawButton(BUTTONS.play, 'PLAY', COLORS.player);
     if (best > 0) text(`BEST SCORE ${best}`, FIELD.width / 2, 620, 20, COLORS.gold, 700);
   }
@@ -572,6 +620,9 @@ export function createRenderer(canvas) {
     text(`SCORE  ${world.score}`, FIELD.width / 2, 330, 34, COLORS.text, 800);
     text(`BEST  ${Math.max(best, world.score)}`, FIELD.width / 2, 378, 22, COLORS.gold, 700);
     text(`SENTINELS BURNED  ${world.stats.kills}    •    PRISMS PLACED  ${world.stats.prismsPlaced}`, FIELD.width / 2, 424, 19, COLORS.prism, 700);
+    if (world.stats.chainKills > 0) {
+      text(`CHAIN KILLS  ${world.stats.chainKills}    •    BIGGEST WEB  ${world.stats.maxLinks} LINK${world.stats.maxLinks === 1 ? '' : 'S'}`, FIELD.width / 2, 454, 19, COLORS.link, 700);
+    }
     drawButton(BUTTONS.restart, 'PLAY AGAIN', COLORS.gold);
   }
 
@@ -611,9 +662,20 @@ export function createRenderer(canvas) {
       drawParticles(world);
       if (screen !== SCREEN_TITLE) drawPlayer(world.player, world.time);
       if (screen === SCREEN_PLAY || screen === SCREEN_PAUSED) drawDarkness(world);
-      // Beams cut through the dark: they are drawn after the darkness, not under it.
+      // Beams and links cut through the dark: they are drawn after the darkness, not under it.
+      for (const link of world.links) drawLink(link, world.time);
       for (const beam of world.beams) drawBeam(beam, world.time);
       drawFloaters(world);
+      if (world.fanfare > 0) {
+        // Wave-clear fanfare: a gold pulse of light washes out from the orb.
+        const f = Math.min(1, world.fanfare);
+        const p = world.player;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 720);
+        g.addColorStop(0, `rgba(255, 210, 63, ${(0.28 * f).toFixed(2)})`);
+        g.addColorStop(1, 'rgba(255, 210, 63, 0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, FIELD.width, FIELD.height);
+      }
       if (world.flash > 0) {
         ctx.fillStyle = `rgba(255, 59, 92, ${(world.flash * 0.55).toFixed(2)})`;
         ctx.fillRect(0, 0, FIELD.width, FIELD.height);

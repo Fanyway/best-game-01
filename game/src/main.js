@@ -70,8 +70,12 @@ function handleEvents(events) {
     if (event.type === 'pickup') audio.pickup(event.combo);
     if (event.type === 'powerup') audio.powerup();
     if (event.type === 'beam') audio.beam();
+    if (event.type === 'link') audio.link();
     if (event.type === 'split') audio.split();
-    if (event.type === 'kill') audio.burn();
+    if (event.type === 'kill') {
+      if (event.linked) audio.chainKill();
+      else audio.burn();
+    }
     if (event.type === 'bossDown') {
       audio.win();
       announce(`Boss burned! Score ${event.score}.`);

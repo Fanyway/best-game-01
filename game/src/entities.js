@@ -9,6 +9,7 @@ import {
   FIELD,
   KILL_SCORE,
   LIGHT,
+  LINK,
   PLAYER,
   POWERUP,
   PRISM,
@@ -105,7 +106,107 @@ export function spawnPrism(world) {
     ttl: PRISM.ttl,
     maxTtl: PRISM.ttl,
     phase: world.random() * Math.PI * 2,
+    linked: false,
   });
+}
+
+/** Distance from point (px, py) to the segment (x1, y1)-(x2, y2). */
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t * dx;
+  const cy = y1 + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+
+/**
+ * Burn one sentinel down and settle the reward. `linked` marks a chain kill: it pays
+ * the link bonus, bursts bigger, and reads as LINK on the screen. Splitter deaths spawn
+ * two minis; the boss reports itself. Used by beams and by chains alike.
+ */
+function killSentinel(world, target, events, linked) {
+  const idx = world.sentinels.indexOf(target);
+  if (idx < 0) return;
+  world.sentinels.splice(idx, 1);
+  const base = KILL_SCORE[target.kind] || 50;
+  const value = linked ? Math.round(base * LINK.killBonusMul) : base;
+  world.score += value;
+  world.stats.kills += 1;
+  if (linked) world.stats.chainKills += 1;
+  if (linked) {
+    burst(world, target.x, target.y, '#5eead4', 30, 320);
+    burst(world, target.x, target.y, '#aef7ff', 14, 220);
+    floater(world, target.x, target.y - 10, `LINK +${value}`, '#5eead4');
+  } else {
+    burst(world, target.x, target.y, '#aef7ff', 20, 260);
+    floater(world, target.x, target.y - 10, `+${value}`, '#aef7ff');
+  }
+  events.push({ type: 'kill', kind: target.kind, value, x: target.x, y: target.y, linked });
+  if (target.kind === 'splitter') {
+    for (let i = 0; i < 2; i += 1) {
+      spawnSentinel(world, world.random, world.spec.speedMul, 'mini');
+      const mini = world.sentinels[world.sentinels.length - 1];
+      mini.x = Math.min(FIELD.width - mini.radius, Math.max(mini.radius, target.x + (i === 0 ? -24 : 24)));
+      mini.y = Math.min(FIELD.height - mini.radius, Math.max(mini.radius, target.y + (i === 0 ? -14 : 14)));
+    }
+    events.push({ type: 'split', x: target.x, y: target.y });
+  }
+  if (target.boss) {
+    events.push({ type: 'bossDown', score: world.score });
+  }
+}
+
+/**
+ * Prism links (v3): every pair of prisms within LINK.range joins into a chain of light.
+ * A chain burns any sentinel it touches, and both prisms it joins resonate — their own
+ * beams burn harder. Returns events: a `link` event when the web grows, so the sound
+ * board can chime it. The live links are left in world.links for the renderer to draw.
+ */
+export function updateLinks(world, dt) {
+  const events = [];
+  world.links = [];
+  for (const prism of world.prisms) prism.linked = false;
+  for (let i = 0; i < world.prisms.length; i += 1) {
+    for (let j = i + 1; j < world.prisms.length; j += 1) {
+      const a = world.prisms[i];
+      const b = world.prisms[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      if (dx * dx + dy * dy > LINK.range * LINK.range) continue;
+      a.linked = true;
+      b.linked = true;
+      world.links.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    }
+  }
+  if (world.links.length > world.linkCount) {
+    events.push({ type: 'link', count: world.links.length });
+  }
+  world.linkCount = world.links.length;
+  world.stats.maxLinks = Math.max(world.stats.maxLinks, world.links.length);
+  for (const link of world.links) {
+    for (const s of [...world.sentinels]) {
+      if (!world.sentinels.includes(s)) continue;
+      if (distToSegment(s.x, s.y, link.x1, link.y1, link.x2, link.y2) > s.radius + 8) continue;
+      s.hp -= LINK.damagePerSecond * dt;
+      if (world.random() < 0.5) {
+        world.particles.push({
+          x: s.x + (world.random() - 0.5) * s.radius * 2,
+          y: s.y + (world.random() - 0.5) * s.radius * 2,
+          vx: (world.random() - 0.5) * 120,
+          vy: (world.random() - 0.5) * 120,
+          life: 0.3,
+          maxLife: 0.3,
+          color: '#5eead4',
+          size: 2 + world.random() * 2,
+        });
+      }
+      if (s.hp <= 0) killSentinel(world, s, events, true);
+    }
+  }
+  return events;
 }
 
 /** A power-up of a random kind, floating where the player can reach it. */
@@ -231,9 +332,9 @@ export function updateSentinels(world, dt) {
 }
 
 /**
- * Each prisma aims its beam at the nearest sentinel in range and burns it. A beam that
- * kills returns an event with the score; a splitter's death spawns two minis. The live
- * beams are left in world.beams for the renderer to draw.
+ * Each prisma aims its beam at the nearest sentinel in range and burns it. A linked
+ * prisma resonates: its beam burns harder. A beam that kills returns an event with the
+ * score. The live beams are left in world.beams for the renderer to draw.
  */
 export function updateBeams(world, dt) {
   const events = [];
@@ -251,8 +352,9 @@ export function updateBeams(world, dt) {
       }
     }
     if (!target) continue;
-    world.beams.push({ x1: prism.x, y1: prism.y, x2: target.x, y2: target.y, kind: target.kind });
-    target.hp -= PRISM.damagePerSecond * dt;
+    world.beams.push({ x1: prism.x, y1: prism.y, x2: target.x, y2: target.y, kind: target.kind, linked: prism.linked });
+    const damage = PRISM.damagePerSecond * (prism.linked ? LINK.resonanceMul : 1) * dt;
+    target.hp -= damage;
     // Burn sparks where the beam lands, so a hit reads even at a glance.
     if (world.random() < 0.5) {
       world.particles.push({
@@ -266,28 +368,7 @@ export function updateBeams(world, dt) {
         size: 2 + world.random() * 2,
       });
     }
-    if (target.hp <= 0) {
-      const idx = world.sentinels.indexOf(target);
-      if (idx >= 0) world.sentinels.splice(idx, 1);
-      const value = KILL_SCORE[target.kind] || 50;
-      world.score += value;
-      world.stats.kills += 1;
-      burst(world, target.x, target.y, '#aef7ff', 20, 260);
-      floater(world, target.x, target.y - 10, `+${value}`, '#aef7ff');
-      events.push({ type: 'kill', kind: target.kind, value, x: target.x, y: target.y });
-      if (target.kind === 'splitter') {
-        for (let i = 0; i < 2; i += 1) {
-          spawnSentinel(world, world.random, world.spec.speedMul, 'mini');
-          const mini = world.sentinels[world.sentinels.length - 1];
-          mini.x = Math.min(FIELD.width - mini.radius, Math.max(mini.radius, target.x + (i === 0 ? -24 : 24)));
-          mini.y = Math.min(FIELD.height - mini.radius, Math.max(mini.radius, target.y + (i === 0 ? -14 : 14)));
-        }
-        events.push({ type: 'split', x: target.x, y: target.y });
-      }
-      if (target.boss) {
-        events.push({ type: 'bossDown', score: world.score });
-      }
-    }
+    if (target.hp <= 0) killSentinel(world, target, events, false);
   }
   return events;
 }

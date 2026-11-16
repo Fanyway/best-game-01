@@ -5,6 +5,9 @@
 // v2: light is a resource. It drains every second and faster on surge waves; each shard
 // feeds it back. Banked shards widen the light — and buy prisms, so every prisma costs
 // vision. Prisms bend light into beams that burn sentinels; the only way to kill one.
+// v3: prisms link into chains of light that burn anything they touch, and a linked
+// prisma's beam burns harder. Placement is a network now: cluster for a web, spread
+// for coverage. A wave clear also lights a fanfare pulse across the arena.
 
 import {
   COLORS,
@@ -29,6 +32,7 @@ import {
   spawnSentinel,
   spawnShard,
   updateBeams,
+  updateLinks,
   updatePlayer,
   updatePowerups,
   updatePrisms,
@@ -52,6 +56,8 @@ export function createWorld(random) {
     sentinels: [],
     prisms: [],
     beams: [],
+    links: [],
+    linkCount: 0,
     powerups: [],
     particles: [],
     floaters: [],
@@ -68,10 +74,11 @@ export function createWorld(random) {
     time: 0,
     shake: 0,
     flash: 0,
+    fanfare: 0,
     waveBanner: 0,
     beamSoundTimer: 0,
     spawnTimer: 2,
-    stats: { kills: 0, prismsPlaced: 0, shardsEaten: 0 },
+    stats: { kills: 0, chainKills: 0, maxLinks: 0, prismsPlaced: 0, shardsEaten: 0 },
     over: false,
     won: false,
   };
@@ -144,6 +151,7 @@ export function stepWorld(world, input, dt) {
   if (world.waveBanner > 0) world.waveBanner -= dt;
   if (world.shake > 0) world.shake -= dt;
   if (world.flash > 0) world.flash -= dt;
+  if (world.fanfare > 0) world.fanfare -= dt;
   if (world.comboTimer > 0) {
     world.comboTimer -= dt;
     if (world.comboTimer <= 0) world.combo = 0;
@@ -161,6 +169,10 @@ export function stepWorld(world, input, dt) {
   updateShards(world, dt);
   updatePowerups(world, dt);
   updatePrisms(world, dt);
+  // Links first: they mark which prisms resonate before the beams burn.
+  for (const event of updateLinks(world, dt)) {
+    events.push(event);
+  }
   for (const event of updateBeams(world, dt)) {
     events.push(event);
   }
@@ -208,6 +220,7 @@ export function stepWorld(world, input, dt) {
         } else {
           world.score += WAVE_CLEAR_BONUS * world.wave;
           world.lives = Math.min(LIVES, world.lives + 1);
+          world.fanfare = 1.4;
           world.wave += 1;
           world.sentinels = [];
           events.push({ type: 'wave', wave: world.wave, bonus: WAVE_CLEAR_BONUS * (world.wave - 1) });

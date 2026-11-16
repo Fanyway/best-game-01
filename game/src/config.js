@@ -1,9 +1,13 @@
 // LUMEN DRIFT v2 — tuning, palette and wave table. One place holds every number the
 // game balances on, so a wave or a speed is a one-line change, never a hunt.
 //
-// v2: light is a weapon. The dark closes in as your light drains; shards feed it back.
+// v3: light is a weapon. The dark closes in as your light drains; shards feed it back.
 // Banked shards widen your light — or buy prisms that bend light into beams that burn
 // sentinels. Hoard for a wide, safe glow, or spend for firepower: that choice is the game.
+// v3: prisms LINK. Two prisms close together join into a chain of light that burns
+// anything it touches, and a linked prisma's own beam burns 25% harder. Placing prisms
+// is now a network, not a scatter: cluster them for a burning web, or spread them wide
+// for coverage. A chain kill pays 25% extra — the web rewards the bold.
 
 /** Logical playfield, in pixels. The canvas scales to the window; the game always thinks in these. */
 export const FIELD = { width: 1280, height: 720 };
@@ -36,6 +40,8 @@ export const COLORS = {
   beamCore: '#ffffff',
   prism: '#7df9ff',
   prismCore: '#ffffff',
+  link: '#5eead4',
+  linkCore: '#d1fae5',
   shield: '#4de8ff',
   slow: '#c77dff',
   magnet: '#ffb703',
@@ -92,8 +98,20 @@ export const PRISM = {
   max: 3,
   range: 340,
   damagePerSecond: 1.2,
-  ttl: 22,
+  ttl: 20,
   radius: 15,
+};
+
+/**
+ * Prism links (v3): two prisms within range join into a chain of light. The chain burns
+ * any sentinel it touches; a linked prisma's own beam burns harder (resonance); a
+ * chain kill pays a bonus. One concept, three rewards — placement becomes a network.
+ */
+export const LINK = {
+  range: 380,
+  damagePerSecond: 0.8,
+  resonanceMul: 1.25,
+  killBonusMul: 1.25,
 };
 
 /** Score for burning a sentinel of each kind. */
